@@ -16,7 +16,7 @@ import (
 	flags "github.com/jessevdk/go-flags"
 )
 
-const Version = "1.0.0"
+const Version = "1.0.1"
 
 type config struct {
 	Addr       string `short:"a" long:"addr"    description:"Address to listen on" default:":8080"`
@@ -119,16 +119,19 @@ func commandFunc(opts config, cmdArgs []string) http.HandlerFunc {
 			return
 		}
 
+		args := make([]string, len(cmdArgs))
+		copy(args, cmdArgs)
+
 		if opts.PermitArgs {
 			query := r.URL.Query()
-			cmdArgs = append(cmdArgs, query["arg"]...)
+			args = append(args, query["arg"]...)
 		}
 
 		var cmd *exec.Cmd
 		if opts.Exec {
-			cmd = exec.Command(cmdArgs[0], cmdArgs[1:]...)
+			cmd = exec.Command(args[0], args[1:]...)
 		} else {
-			cmd = exec.Command("sh", "-c", strings.Join(cmdArgs, " "))
+			cmd = exec.Command("sh", "-c", strings.Join(args, " "))
 		}
 
 		ch, err := combinedOutputChannel(cmd)
