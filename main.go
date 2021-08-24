@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -13,10 +12,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/creack/pty"
 	flags "github.com/jessevdk/go-flags"
 )
 
-const Version = "1.0.1"
+const Version = "1.0.2"
 
 type config struct {
 	Addr       string `short:"a" long:"addr"    description:"Address to listen on" default:":8080"`
@@ -54,65 +54,6 @@ func listenAndServe(addr string, mux *http.ServeMux) error {
 	return http.Serve(conn, mux)
 }
 
-func combinedOutputChannel(cmd *exec.Cmd) (chan []byte, error) {
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, err
-	}
-
-	r := io.MultiReader(stdoutPipe, stderrPipe)
-	ch := make(chan []byte)
-
-	go func() {
-		defer close(ch)
-
-		buf := make([]byte, 512)
-		for {
-			n, err := r.Read(buf)
-			if err != nil {
-				if err != io.EOF {
-					ch <- []byte(err.Error())
-				}
-				break
-			}
-
-			dup := make([]byte, n)
-			copy(dup, buf)
-
-			ch <- dup
-		}
-	}()
-
-	return ch, nil
-}
-
-func writeResponse(w io.Writer, ch chan []byte) {
-	tick := time.NewTicker(1 * time.Second)
-	defer tick.Stop()
-
-	for {
-		select {
-		case chunk, ok := <-ch:
-			if ok != true {
-				return
-			}
-			w.Write(chunk)
-		case <-tick.C:
-			// send NUL to keep the http connection alive
-			w.Write([]byte("\x00"))
-		}
-
-		if f, ok := w.(http.Flusher); ok {
-			f.Flush()
-		}
-	}
-}
-
 func commandFunc(opts config, cmdArgs []string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(strings.ToLower(r.Header.Get("User-Agent")), "curl") {
@@ -134,18 +75,52 @@ func commandFunc(opts config, cmdArgs []string) http.HandlerFunc {
 			cmd = exec.Command("sh", "-c", strings.Join(args, " "))
 		}
 
-		ch, err := combinedOutputChannel(cmd)
+		ptmx, err := pty.Start(cmd)
 		if err != nil {
 			fmt.Fprintln(w, err)
 			return
 		}
+		defer ptmx.Close()
 
-		if err := cmd.Start(); err != nil {
-			fmt.Fprintln(w, err)
-			return
+		ch := make(chan []byte)
+		go func() {
+			defer close(ch)
+
+			buf := make([]byte, 512)
+			for {
+				n, err := ptmx.Read(buf)
+				if err != nil {
+					break
+				}
+
+				dup := make([]byte, n)
+				copy(dup, buf)
+
+				ch <- dup
+			}
+		}()
+
+		tick := time.NewTicker(1 * time.Second)
+		defer tick.Stop()
+
+	L:
+		for {
+			select {
+			case buf, ok := <-ch:
+				if ok != true {
+					break L
+				}
+				w.Write(buf)
+			case <-tick.C:
+				// send NUL to keep the http connection alive
+				w.Write([]byte("\x00"))
+			}
+
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
 		}
 
-		writeResponse(w, ch)
 		if err := cmd.Wait(); err != nil {
 			fmt.Fprintln(w, err)
 			return
