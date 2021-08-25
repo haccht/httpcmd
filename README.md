@@ -6,7 +6,7 @@
 Run `httpcmd` with your preferred command as its arguments.
 
 ```bash
-$ httpcmd -addr 127.0.0.1:8080 tail -f /var/log/syslog
+$ httpcmd --addr 127.0.0.1:8080 tail -f /var/log/syslog
 ```
 
 On the client side, you can invoke the command using `curl`.
