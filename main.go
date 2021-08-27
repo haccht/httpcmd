@@ -16,7 +16,7 @@ import (
 	flags "github.com/jessevdk/go-flags"
 )
 
-const Version = "1.0.2"
+const Version = "1.0.3"
 
 type config struct {
 	Addr       string `short:"a" long:"addr"    description:"Address to listen on" default:":8080"`
@@ -106,6 +106,9 @@ func commandFunc(opts config, cmdArgs []string) http.HandlerFunc {
 	L:
 		for {
 			select {
+			case <-r.Context().Done():
+				cmd.Process.Kill()
+				break L
 			case buf, ok := <-ch:
 				if ok != true {
 					break L
