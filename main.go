@@ -143,7 +143,10 @@ func main() {
 
 	cmdArgs, err := parser.Parse()
 	if err != nil {
-		os.Exit(1)
+		if fe, ok := err.(*flags.Error); ok && fe.Type == flags.ErrHelp {
+			os.Exit(0)
+		}
+		log.Fatal(err)
 	} else if len(cmdArgs) < 1 {
 		parser.WriteHelp(os.Stderr)
 		os.Exit(1)
